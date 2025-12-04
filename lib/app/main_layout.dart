@@ -1,4 +1,5 @@
 import 'package:controle_compras/features/dashboard/dashboard_page.dart';
+import 'package:controle_compras/features/history/price_history_page.dart';
 import 'package:controle_compras/features/home/tabs/purchases_tab.dart';
 import 'package:controle_compras/features/home/tabs/registrations_tab.dart';
 import 'package:controle_compras/features/home/tabs/tracking_tab.dart';
@@ -15,18 +16,14 @@ class _MainLayoutState extends State<MainLayout> {
   int _selectedIndex = 0;
 
   final List<Widget> _pages = [
-    const DashboardPage(), // Nova página inicial
+    const DashboardPage(),
     const PurchasesTab(),
     const TrackingTab(),
+    const PriceHistoryPage(),
     const RegistrationsTab(),
   ];
 
-  final List<String> _pageTitles = [
-    'Dashboard',
-    'Compras',
-    'Acompanhamento',
-    'Cadastros',
-  ];
+  final List<String> _pageTitles = ['Dashboard', 'Compras', 'Acompanhamento', 'Histórico de Preços', 'Cadastros'];
 
   @override
   Widget build(BuildContext context) {
@@ -39,28 +36,26 @@ class _MainLayoutState extends State<MainLayout> {
               elevation: 1,
               child: Column(
                 children: [
-                  const DrawerHeader(
+                  DrawerHeader(
+                    decoration: const BoxDecoration(color: Colors.white),
                     child: Center(
-                      child: Text(
-                        'Controle de Compras',
-                        style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                      ),
+                      child: Image.asset('assets/images/logotipo.png', errorBuilder: (context, error, stackTrace) => const Text('Logotipo não encontrado')),
                     ),
                   ),
                   _buildNavItem(Icons.dashboard, 'Dashboard', 0),
                   _buildNavItem(Icons.shopping_cart, 'Compras', 1),
                   _buildNavItem(Icons.track_changes, 'Acompanhamento', 2),
-                  _buildNavItem(Icons.app_registration, 'Cadastros', 3),
+                  _buildNavItem(Icons.history, 'Histórico de Preços', 3),
+                  const Spacer(),
+                  _buildNavItem(Icons.app_registration, 'Cadastros', 4),
+                  const SizedBox(height: 20),
                 ],
               ),
             ),
           ),
           Expanded(
             child: Scaffold(
-              appBar: AppBar(
-                title: Text(_pageTitles[_selectedIndex]),
-                automaticallyImplyLeading: false,
-              ),
+              appBar: AppBar(title: Text(_pageTitles[_selectedIndex]), automaticallyImplyLeading: false),
               body: _pages[_selectedIndex],
             ),
           ),
@@ -76,11 +71,7 @@ class _MainLayoutState extends State<MainLayout> {
       title: Text(title),
       selected: isSelected,
       selectedTileColor: Theme.of(context).primaryColor.withOpacity(0.1),
-      onTap: () {
-        setState(() {
-          _selectedIndex = index;
-        });
-      },
+      onTap: () => setState(() => _selectedIndex = index),
     );
   }
 }

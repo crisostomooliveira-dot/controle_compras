@@ -4,7 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 class TrackingTab extends StatefulWidget {
-  const TrackingTab({super.key});
+  final String? constructionIdFilter;
+
+  const TrackingTab({super.key, this.constructionIdFilter});
 
   @override
   State<TrackingTab> createState() => _TrackingTabState();
@@ -20,6 +22,7 @@ class _TrackingTabState extends State<TrackingTab> {
   @override
   void initState() {
     super.initState();
+    _purchasesStream = const Stream.empty();
     _nfController.addListener(() => _updateStream());
     _updateStream();
   }
@@ -27,10 +30,22 @@ class _TrackingTabState extends State<TrackingTab> {
   void _updateStream() {
     Query query = FirebaseFirestore.instance.collection('purchase_requests');
 
-    if (_generalStatusFilter != null) query = query.where('status', isEqualTo: _generalStatusFilter);
-    if (_nfController.text.isNotEmpty) query = query.where('invoiceNumber', isEqualTo: _nfController.text.trim());
-    if (_paymentStatusFilter != null) query = query.where('paymentStatus', isEqualTo: _paymentStatusFilter);
-    if (_deliveryStatusFilter != null) query = query.where('deliveryStatus', isEqualTo: _deliveryStatusFilter);
+    if (widget.constructionIdFilter != null) {
+      query = query.where('constructionId', isEqualTo: widget.constructionIdFilter);
+    }
+
+    if (_generalStatusFilter != null) {
+      query = query.where('status', isEqualTo: _generalStatusFilter);
+    }
+    if (_nfController.text.isNotEmpty) {
+      query = query.where('invoiceNumber', isEqualTo: _nfController.text.trim());
+    }
+    if (_paymentStatusFilter != null) {
+      query = query.where('paymentStatus', isEqualTo: _paymentStatusFilter);
+    }
+    if (_deliveryStatusFilter != null) {
+      query = query.where('deliveryStatus', isEqualTo: _deliveryStatusFilter);
+    }
 
     query = query.orderBy('requestDate', descending: true);
 
@@ -44,14 +59,14 @@ class _TrackingTabState extends State<TrackingTab> {
     return Scaffold(
       body: Column(
         children: [
-          _buildFilters(),
+          if (widget.constructionIdFilter == null) _buildFilters(),
           Expanded(
             child: StreamBuilder<QuerySnapshot>(
               stream: _purchasesStream,
               builder: (context, snapshot) {
                 if (snapshot.hasError) return const Center(child: Text('Ocorreu um erro.'));
                 if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
-                if (snapshot.data!.docs.isEmpty) return const Center(child: Text('Nenhuma compra encontrada com estes filtros.'));
+                if (snapshot.data!.docs.isEmpty) return const Center(child: Text('Nenhuma compra encontrada.'));
 
                 return ListView(children: snapshot.data!.docs.map((doc) => _buildTrackingCard(context, doc)).toList());
               },
@@ -65,7 +80,21 @@ class _TrackingTabState extends State<TrackingTab> {
   Widget _buildTrackingCard(BuildContext context, DocumentSnapshot doc) {
     final data = doc.data()! as Map<String, dynamic>;
     final status = data['status'] ?? 'N/A';
+    
+    String getSupplierDisplayName() {
+      final legacySupplierName = data['selectedSupplierName'];
+      if (legacySupplierName != null) return legacySupplierName;
+      final items = data['finalItems'] as List<dynamic>?;
+      if (items == null || items.isEmpty) return 'N/A';
+      final supplierNames = items.map((item) => item['supplierName'] as String?).toSet();
+      supplierNames.removeWhere((name) => name == null);
+      if (supplierNames.isEmpty) return 'N/A';
+      if (supplierNames.length == 1) return supplierNames.first!;
+      return 'Compra Mista (${supplierNames.length})';
+    }
 
+    final supplierName = getSupplierDisplayName();
+    
     Widget content;
     if (status == 'Solicitado') {
       final items = (data['items'] as List<dynamic>?) ?? [];
@@ -78,10 +107,11 @@ class _TrackingTabState extends State<TrackingTab> {
 
       if (startDate != null && endDate != null) {
         final totalDuration = endDate.difference(startDate).inDays;
-        final passedDuration = DateTime.now().difference(startDate).inDays;
-        if (totalDuration > 0) progress = (passedDuration / totalDuration).clamp(0.0, 1.0);
-        if (DateTime.now().isAfter(endDate)) progressColor = Colors.red;
-        else progressColor = Colors.blue;
+        if (totalDuration > 0) {
+          final passedDuration = DateTime.now().difference(startDate).inDays;
+          progress = (passedDuration / totalDuration).clamp(0.0, 1.0);
+        }
+        progressColor = DateTime.now().isAfter(endDate) ? Colors.red : Colors.blue;
       }
       if (data['deliveryStatus'] == 'Entregue') {
         progress = 1.0;
@@ -94,14 +124,11 @@ class _TrackingTabState extends State<TrackingTab> {
           if (endDate != null) ...[
             LinearProgressIndicator(value: progress, backgroundColor: Colors.grey[300], color: progressColor),
             const SizedBox(height: 4),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [Text(DateFormat('dd/MM/yy').format(startDate!)), Text(DateFormat('dd/MM/yy').format(endDate))],
-            ),
+            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text(DateFormat('dd/MM/yy').format(startDate!)), Text(DateFormat('dd/MM/yy').format(endDate))]),
           ],
           const SizedBox(height: 8),
-          Text('Fornecedor: ${data['selectedSupplierName'] ?? '-'}'),
-          Text('NF: ${data['invoiceNumber'] ?? '-'} | Rastreio: ${data['trackingCode'] ?? '-'}'),
+          Text('Fornecedor: $supplierName'),
+          Text('NF: ${data['invoiceNumber'] ?? '-'}'),
           Text('Pag.: ${data['paymentStatus'] ?? '-'} | Entrega: ${data['deliveryStatus'] ?? '-'}'),
         ],
       );
@@ -134,17 +161,25 @@ class _TrackingTabState extends State<TrackingTab> {
           DropdownButtonFormField<String>(
             decoration: const InputDecoration(labelText: 'Filtrar por Status Geral'),
             value: _generalStatusFilter,
+            onChanged: (value) {
+              setState(() {
+                _generalStatusFilter = value;
+                _paymentStatusFilter = null;
+                _deliveryStatusFilter = null;
+                _nfController.clear();
+                _updateStream();
+              });
+            },
             items: ['Solicitado', 'Pedido Criado', 'Finalizado'].map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
-            onChanged: (value) => setState(() { _generalStatusFilter = value; _updateStream(); }),
           ),
           const SizedBox(height: 12),
           TextField(controller: _nfController, decoration: const InputDecoration(labelText: 'Buscar por Nº da Nota Fiscal')),
           const SizedBox(height: 12),
           Row(
             children: [
-              Expanded(child: DropdownButtonFormField<String>(decoration: const InputDecoration(labelText: 'Pagamento'), value: _paymentStatusFilter, items: ['Pendente', 'Pago', 'Atrasado'].map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(), onChanged: (v) => setState(() { _paymentStatusFilter = v; _updateStream(); }))),
+              Expanded(child: DropdownButtonFormField<String>(decoration: const InputDecoration(labelText: 'Pagamento'), value: _paymentStatusFilter, items: ['Aguardando Aprovação', 'Pendente', 'Pago', 'Atrasado'].map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(), onChanged: (v) => setState(() { _paymentStatusFilter = v; _updateStream(); }))),
               const SizedBox(width: 12),
-              Expanded(child: DropdownButtonFormField<String>(decoration: const InputDecoration(labelText: 'Entrega'), value: _deliveryStatusFilter, items: ['Aguardando Entrega', 'Entregue', 'Em Trânsito'].map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(), onChanged: (v) => setState(() { _deliveryStatusFilter = v; _updateStream(); }))),
+              Expanded(child: DropdownButtonFormField<String>(decoration: const InputDecoration(labelText: 'Entrega'), value: _deliveryStatusFilter, items: ['Aguardando Entrega', 'Entregue', 'Em Trânsito', 'Retirar Material'].map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(), onChanged: (v) => setState(() { _deliveryStatusFilter = v; _updateStream(); }))),
             ],
           ),
         ],

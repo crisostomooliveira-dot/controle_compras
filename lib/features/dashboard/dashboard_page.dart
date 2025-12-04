@@ -1,5 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:controle_compras/features/home/tabs/tracking_tab.dart';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 
 class DashboardPage extends StatefulWidget {
   const DashboardPage({super.key});
@@ -20,25 +22,32 @@ class _DashboardPageState extends State<DashboardPage> {
   Future<Map<String, dynamic>> _fetchDashboardData() async {
     final constructionsFuture = FirebaseFirestore.instance.collection('constructions').get();
     final requestsFuture = FirebaseFirestore.instance.collection('purchase_requests').get();
-
     final results = await Future.wait([constructionsFuture, requestsFuture]);
 
     final constructions = (results[0] as QuerySnapshot).docs;
     final requests = (results[1] as QuerySnapshot).docs;
 
-    final Map<String, List<DocumentSnapshot>> requestsByConstructionId = {};
+    double totalPurchasedValue = 0;
+    final Map<String, List<DocumentSnapshot>> requestsByConstruction = {};
+    final Map<String, double> valueByConstruction = {};
+
     for (var req in requests) {
-      // Correção: Garantir que data() é um Map
-      final data = req.data() as Map<String, dynamic>; 
+      final data = req.data() as Map<String, dynamic>;
       final constructionId = data['constructionId'];
+      final value = (data['finalValue'] ?? data['totalPrice'] as num?)?.toDouble() ?? 0.0;
+
       if (constructionId != null) {
-        (requestsByConstructionId[constructionId] ??= []).add(req);
+        (requestsByConstruction[constructionId] ??= []).add(req);
+        valueByConstruction[constructionId] = (valueByConstruction[constructionId] ?? 0) + value;
       }
+      totalPurchasedValue += value;
     }
 
     return {
       'constructions': constructions,
-      'requestsByConstructionId': requestsByConstructionId,
+      'requestsByConstructionId': requestsByConstruction,
+      'valueByConstruction': valueByConstruction,
+      'totalPurchasedValue': totalPurchasedValue,
     };
   }
 
@@ -48,36 +57,30 @@ class _DashboardPageState extends State<DashboardPage> {
       body: FutureBuilder<Map<String, dynamic>>(
         future: _dashboardData,
         builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (snapshot.hasError) {
-            return Center(child: Text('Erro ao carregar dados: ${snapshot.error}'));
-          }
-          if (!snapshot.hasData || (snapshot.data!['constructions'] as List).isEmpty) {
-            return const Center(child: Text('Nenhuma obra cadastrada para exibir o dashboard.'));
-          }
+          if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
+          if (snapshot.hasError) return Center(child: Text('Erro: ${snapshot.error}'));
+          if (!snapshot.hasData) return const Center(child: Text('Nenhum dado para exibir.'));
 
           final constructions = snapshot.data!['constructions'] as List<DocumentSnapshot>;
-          final requestsByConstructionId = snapshot.data!['requestsByConstructionId'] as Map<String, List<DocumentSnapshot>>;
+          final valueByConstruction = snapshot.data!['valueByConstruction'] as Map<String, double>;
+          final totalPurchasedValue = snapshot.data!['totalPurchasedValue'] as double;
 
           return RefreshIndicator(
-            onRefresh: () async {
-              setState(() {
-                _dashboardData = _fetchDashboardData();
-              });
-            },
-            child: ListView(
+            onRefresh: () async => setState(() => _dashboardData = _fetchDashboardData()),
+            child: Padding(
               padding: const EdgeInsets.all(16.0),
-              children: [
-                _buildLegend(),
-                const SizedBox(height: 24),
-                ...constructions.map((constructionDoc) {
-                  final constructionId = constructionDoc.id;
-                  final requestsForConstruction = requestsByConstructionId[constructionId] ?? [];
-                  return _buildConstructionStatusCard(constructionDoc, requestsForConstruction);
-                }).toList(),
-              ],
+              child: GridView.builder(
+                gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(maxCrossAxisExtent: 350, childAspectRatio: 2.0, crossAxisSpacing: 16, mainAxisSpacing: 16),
+                itemCount: constructions.length + 1,
+                itemBuilder: (context, index) {
+                  if (index == 0) {
+                    return _buildTotalValueCard(totalPurchasedValue);
+                  }
+                  final constructionDoc = constructions[index - 1];
+                  final totalValue = valueByConstruction[constructionDoc.id] ?? 0.0;
+                  return _buildConstructionCard(context, constructionDoc, totalValue);
+                },
+              ),
             ),
           );
         },
@@ -85,75 +88,43 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
-  Widget _buildLegend() {
-    return Wrap(
-      spacing: 16,
-      runSpacing: 8,
-      alignment: WrapAlignment.center,
-      children: [
-        _buildLegendItem(Colors.amber, 'Solicitado'),
-        _buildLegendItem(Colors.blue, 'Pedido Criado'),
-        _buildLegendItem(Colors.green, 'Finalizado'),
-      ],
-    );
-  }
-
-  Widget _buildLegendItem(Color color, String label) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [Container(width: 16, height: 16, color: color), const SizedBox(width: 8), Text(label)],
-    );
-  }
-
-  Widget _buildConstructionStatusCard(DocumentSnapshot constructionDoc, List<DocumentSnapshot> requests) {
-    final constructionData = constructionDoc.data()! as Map<String, dynamic>;
-
-    int solicitados = 0, pedidosCriados = 0, finalizados = 0;
-    for (var req in requests) {
-      // Correção: Garantir que data() é um Map
-      final data = req.data() as Map<String, dynamic>;
-      switch (data['status']) {
-        case 'Solicitado': solicitados++; break;
-        case 'Pedido Criado': pedidosCriados++; break;
-        case 'Finalizado': finalizados++; break;
-      }
-    }
-    final total = solicitados + pedidosCriados + finalizados;
-
+  Widget _buildTotalValueCard(double totalValue) {
     return Card(
-      margin: const EdgeInsets.only(bottom: 16),
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8), side: BorderSide(color: Theme.of(context).primaryColor, width: 2)),
+      elevation: 0,
+      child: Center(
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Text(constructionData['name'] ?? 'Obra sem nome', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 12),
-            if (total == 0)
-              const Text('Nenhum pedido de compra para esta obra.')
-            else
-              Column(
-                children: [
-                  Text('$total pedidos no total'),
-                  const SizedBox(height: 8),
-                  _buildStatusBar(solicitados, pedidosCriados, finalizados, total),
-                ],
-              ),
+            const Text('VALOR TOTAL GERAL', style: TextStyle(fontSize: 14, color: Colors.grey)),
+            const SizedBox(height: 8),
+            Text(NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$').format(totalValue), style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildStatusBar(int solicitados, int pedidosCriados, int finalizados, int total) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(8),
-      child: Row(
-        children: [
-          if (solicitados > 0) Expanded(flex: solicitados, child: Container(height: 20, color: Colors.amber, child: Center(child: Text(solicitados.toString(), style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold))))),
-          if (pedidosCriados > 0) Expanded(flex: pedidosCriados, child: Container(height: 20, color: Colors.blue, child: Center(child: Text(pedidosCriados.toString(), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))))),
-          if (finalizados > 0) Expanded(flex: finalizados, child: Container(height: 20, color: Colors.green, child: Center(child: Text(finalizados.toString(), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))))),
-        ],
+  Widget _buildConstructionCard(BuildContext context, DocumentSnapshot constructionDoc, double totalValue) {
+    final constructionData = constructionDoc.data()! as Map<String, dynamic>;
+    return Card(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8), side: BorderSide(color: Colors.grey.shade300, width: 1)),
+      elevation: 0,
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (context) => Scaffold(appBar: AppBar(title: Text('Pedidos para ${constructionData['name']}')), body: TrackingTab(constructionIdFilter: constructionDoc.id)))),
+        child: Padding(
+          padding: const EdgeInsets.all(12.0),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Text(constructionData['name'] ?? 'Obra sem nome', textAlign: TextAlign.center, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              Text(NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$').format(totalValue), style: TextStyle(fontSize: 22, color: Theme.of(context).primaryColor, fontWeight: FontWeight.w500)),
+            ],
+          ),
+        ),
       ),
     );
   }

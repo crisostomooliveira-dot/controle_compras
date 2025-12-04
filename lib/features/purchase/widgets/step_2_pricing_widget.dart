@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 
 class Step2PricingWidget extends StatefulWidget {
   final String purchaseRequestId;
@@ -29,26 +30,31 @@ class _Step2PricingWidgetState extends State<Step2PricingWidget> {
       children: [
         const Text('Etapa 2: Cotação de Preços', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
         const SizedBox(height: 16),
-        _buildItemsList(),
+        _buildItemsTable(),
         const Divider(height: 30),
         _buildAddQuotationForm(),
         const Divider(height: 30),
-        const Text('Cotações Adicionadas', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-        _buildQuotationsList(),
+        const Text('Quadro Comparativo de Preços', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 10),
+        _buildQuotationTable(),
       ],
     );
   }
-
-   Widget _buildItemsList() {
+  
+  Widget _buildItemsTable() {
     final items = widget.requestData['items'] as List;
+    num totalQuantity = items.fold(0, (sum, item) => sum + (item['quantity'] as num));
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Text('Itens da Solicitação:', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-        ...items.map((item) => ListTile(
-          title: Text(item['productDescription']),
-          trailing: Text('Qtd: ${item['quantity']} ${item['unit']}'),
-        )).toList(),
+        DataTable(
+          columns: const [DataColumn(label: Text('Descrição')), DataColumn(label: Text('Unidade')), DataColumn(label: Text('Quantidade'))],
+          rows: [
+            ...items.map((item) => DataRow(cells: [DataCell(Text(item['productDescription'])), DataCell(Text(item['unit'])), DataCell(Text(item['quantity'].toString()))])),
+            DataRow(cells: [const DataCell(Text('TOTAL', style: TextStyle(fontWeight: FontWeight.bold))), const DataCell(Text('')), DataCell(Text(totalQuantity.toString(), style: const TextStyle(fontWeight: FontWeight.bold)))])
+          ],
+        ),
       ],
     );
   }
@@ -72,11 +78,7 @@ class _Step2PricingWidgetState extends State<Step2PricingWidget> {
         if (_selectedSupplierId != null)
           Padding(
             padding: const EdgeInsets.only(top: 16.0),
-            child: ElevatedButton.icon(
-              onPressed: _addQuotation,
-              icon: const Icon(Icons.add_shopping_cart),
-              label: const Text('Salvar Cotação do Fornecedor'),
-            ),
+            child: ElevatedButton.icon(onPressed: _addQuotation, icon: const Icon(Icons.add_shopping_cart), label: const Text('Salvar Cotação do Fornecedor')),
           ),
       ],
     );
@@ -96,116 +98,115 @@ class _Step2PricingWidgetState extends State<Step2PricingWidget> {
     }).toList();
   }
 
-  Widget _buildQuotationsList() {
+  Widget _buildQuotationTable() {
+    final List<dynamic> requestItems = widget.requestData['items'];
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance.collection('purchase_requests').doc(widget.purchaseRequestId).collection('quotations').snapshots(),
       builder: (context, snapshot) {
-        if (snapshot.hasError) return const Text('Erro ao carregar cotações.');
         if (!snapshot.hasData || snapshot.data!.docs.isEmpty) return const Center(child: Padding(padding: EdgeInsets.all(16), child: Text('Nenhuma cotação adicionada.')));
-
         final quotations = snapshot.data!.docs;
-        DocumentSnapshot? bestQuotation;
-
-        if (quotations.isNotEmpty) {
-          bestQuotation = quotations.reduce((a, b) => (a['totalPrice'] < b['totalPrice']) ? a : b);
+        final suppliers = quotations.map((doc) => doc.data() as Map<String, dynamic>).toList();
+        final Map<String, double> minPrices = {};
+        for (var item in requestItems) {
+          double currentMin = double.infinity;
+          for (var supplier in suppliers) {
+            final supplierItem = (supplier['items'] as List).firstWhere((i) => i['productId'] == item['productId'], orElse: () => null);
+            if (supplierItem != null) {
+              final price = (supplierItem['unitPrice'] as num).toDouble();
+              if (price > 0 && price < currentMin) currentMin = price;
+            }
+          }
+          minPrices[item['productId']] = currentMin;
         }
-
         return Column(
           children: [
-            ...quotations.map((doc) {
-              final data = doc.data() as Map<String, dynamic>;
-              final isBest = doc.id == bestQuotation?.id;
-              return Card(
-                color: isBest ? Colors.green[100] : null,
-                child: ListTile(
-                  leading: isBest ? const Icon(Icons.star, color: Colors.green) : null,
-                  title: Text(data['supplierName'] ?? 'N/A'),
-                  subtitle: Text('Total: R\$ ${(data['totalPrice'] as num).toStringAsFixed(2)}'),
-                  trailing: IconButton(
-                    icon: const Icon(Icons.delete_outline, color: Colors.red),
-                    tooltip: 'Excluir Cotação',
-                    onPressed: () => _deleteQuotation(doc.id),
-                  ),
-                ),
-              );
-            }).toList(),
-
-            if (bestQuotation != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 24.0),
-                child: ElevatedButton.icon(
-                  icon: const Icon(Icons.check_circle),
-                  label: const Text('Criar Pedido com a Melhor Opção'),
-                  onPressed: () => _createPurchaseOrder(bestQuotation!),
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
-                ),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: DataTable(
+                columns: [const DataColumn(label: Text('Item')), const DataColumn(label: Text('Qtd')), ...suppliers.map((s) => DataColumn(label: Text(s['supplierName'] ?? 'N/A'))), const DataColumn(label: Text('Ações'))],
+                rows: [
+                  ...requestItems.map((item) => DataRow(cells: [DataCell(Text(item['productDescription'])), DataCell(Text('${item['quantity']} ${item['unit']}')), ...suppliers.map((supplier) { final supplierItem = (supplier['items'] as List).firstWhere((i) => i['productId'] == item['productId'], orElse: () => null); if (supplierItem == null) return const DataCell(Text('-')); final price = (supplierItem['unitPrice'] as num).toDouble(); final isMinPrice = price > 0 && price == minPrices[item['productId']]; return DataCell(Text(_formatCurrency(price), style: TextStyle(color: isMinPrice ? Colors.green : Colors.black, fontWeight: isMinPrice ? FontWeight.bold : FontWeight.normal))); }), const DataCell(Text(''))])),
+                  DataRow(cells: [const DataCell(Text('TOTAL', style: TextStyle(fontWeight: FontWeight.bold))), const DataCell(Text('')), ...suppliers.map((s) => DataCell(Text(_formatCurrency((s['totalPrice'] as num).toDouble()), style: const TextStyle(fontWeight: FontWeight.bold)))), DataCell(Row(children: suppliers.map((s) => IconButton(icon: const Icon(Icons.delete_forever, color: Colors.red), onPressed: () => _deleteQuotation(s['supplierId']))).toList()))]),
+                ],
               ),
+            ),
+            const SizedBox(height: 24),
+            if (quotations.isNotEmpty) ElevatedButton.icon(icon: const Icon(Icons.analytics_outlined), label: const Text('Analisar Cotações e Criar Pedido'), onPressed: () => _showMixedOrderDialog(suppliers, requestItems), style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white)),
           ],
         );
       },
     );
   }
 
+  void _showMixedOrderDialog(List<Map<String, dynamic>> suppliers, List<dynamic> requestItems) {
+    final bestBuys = _calculateBestBuys(suppliers, requestItems);
+    if (bestBuys.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Não foi possível determinar a melhor opção. Verifique os preços.')));
+      return;
+    }
+    final totalValue = bestBuys.fold<double>(0, (sum, item) => sum + (item['unitPrice'] * item['quantity']));
+    showDialog(context: context, builder: (ctx) => AlertDialog(title: const Text('Resumo do Pedido Otimizado'), content: SizedBox(width: double.maxFinite, child: ListView(shrinkWrap: true, children: [...bestBuys.map((item) => ListTile(title: Text(item['productDescription']), subtitle: Text('Fornecedor: ${item['supplierName']}'), trailing: Text(_formatCurrency(item['unitPrice'] as double)))), const Divider(), Padding(padding: const EdgeInsets.only(top: 8.0), child: Text('Valor Total do Pedido: ${_formatCurrency(totalValue)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)))])), actions: [TextButton(child: const Text('Cancelar'), onPressed: () => Navigator.of(ctx).pop()), ElevatedButton(child: const Text('Confirmar e Criar Pedido'), onPressed: () { _createMixedPurchaseOrder(bestBuys, totalValue); Navigator.of(ctx).pop(); })]));
+  }
+
+  List<Map<String, dynamic>> _calculateBestBuys(List<Map<String, dynamic>> suppliers, List<dynamic> requestItems) {
+    List<Map<String, dynamic>> bestBuys = [];
+    for (var item in requestItems) {
+      double minPrice = double.infinity;
+      Map<String, dynamic>? bestSupplierOffer;
+      for (var supplier in suppliers) {
+        final supplierItem = (supplier['items'] as List).firstWhere((i) => i['productId'] == item['productId'], orElse: () => null);
+        if (supplierItem != null) {
+          final price = (supplierItem['unitPrice'] as num).toDouble();
+          if (price > 0 && price < minPrice) {
+            minPrice = price;
+            bestSupplierOffer = { ...item, 'unitPrice': price, 'supplierId': supplier['supplierId'], 'supplierName': supplier['supplierName'] };
+          }
+        }
+      }
+      if (bestSupplierOffer != null) bestBuys.add(bestSupplierOffer);
+    }
+    return bestBuys;
+  }
+
+  void _createMixedPurchaseOrder(List<Map<String, dynamic>> finalItems, double totalValue) {
+    final supplierNames = finalItems.map((item) => item['supplierName'] as String?).toSet();
+    supplierNames.removeWhere((name) => name == null);
+    String finalSupplierName = 'Compra Mista';
+    if (supplierNames.length == 1) {
+      finalSupplierName = supplierNames.first!;
+    }
+    FirebaseFirestore.instance.collection('purchase_requests').doc(widget.purchaseRequestId).update({'status': 'Pedido Criado', 'selectedSupplierName': finalSupplierName, 'totalPrice': totalValue, 'finalItems': finalItems, 'orderCreationDate': Timestamp.now()});
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Pedido de compra criado com sucesso!')));
+  }
+
+  String _formatCurrency(double value) => NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$').format(value);
+
   void _addQuotation() async {
     if (_selectedSupplierId == null) return;
-
     final supplierDoc = await FirebaseFirestore.instance.collection('suppliers').doc(_selectedSupplierId).get();
     final supplierName = supplierDoc.data()?['name'] ?? 'N/A';
-    
     final items = widget.requestData['items'] as List;
     List<Map<String, dynamic>> pricedItems = [];
     num totalQuotePrice = 0;
-
     for (var item in items) {
       final productId = item['productId'] as String;
       final priceText = _priceControllers[productId]!.text.replaceAll(',', '.');
       final unitPrice = double.tryParse(priceText) ?? 0.0;
-      
       if (unitPrice <= 0) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Preencha um preço válido para ${item['productDescription']}!')));
-          return;
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Preencha um preço válido para ${item['productDescription']}!')));
+        return;
       }
       final quantity = item['quantity'] as num;
       totalQuotePrice += unitPrice * quantity;
-      
       pricedItems.add({ ...item, 'unitPrice': unitPrice });
     }
-
-    await FirebaseFirestore.instance
-      .collection('purchase_requests').doc(widget.purchaseRequestId)
-      .collection('quotations').doc(_selectedSupplierId)
-      .set({
-        'supplierId': _selectedSupplierId,
-        'supplierName': supplierName,
-        'totalPrice': totalQuotePrice,
-        'items': pricedItems,
-        'addedAt': Timestamp.now(),
-      });
-
+    await FirebaseFirestore.instance.collection('purchase_requests').doc(widget.purchaseRequestId).collection('quotations').doc(_selectedSupplierId).set({'supplierId': _selectedSupplierId, 'supplierName': supplierName, 'totalPrice': totalQuotePrice, 'items': pricedItems, 'addedAt': Timestamp.now()});
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Cotação salva!')));
   }
 
   void _deleteQuotation(String quotationId) {
-    FirebaseFirestore.instance
-      .collection('purchase_requests').doc(widget.purchaseRequestId)
-      .collection('quotations').doc(quotationId)
-      .delete();
+    FirebaseFirestore.instance.collection('purchase_requests').doc(widget.purchaseRequestId).collection('quotations').doc(quotationId).delete();
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Cotação excluída!')));
-  }
-
-  void _createPurchaseOrder(DocumentSnapshot bestQuotationDoc) {
-    final bestQuotationData = bestQuotationDoc.data() as Map<String, dynamic>;
-
-    FirebaseFirestore.instance.collection('purchase_requests').doc(widget.purchaseRequestId).update({
-      'status': 'Pedido Criado',
-      'selectedSupplierId': bestQuotationData['supplierId'],
-      'selectedSupplierName': bestQuotationData['supplierName'],
-      'totalPrice': bestQuotationData['totalPrice'],
-      'finalItems': bestQuotationData['items'],
-      'orderCreationDate': Timestamp.now(),
-    });
-
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Pedido de compra criado com sucesso!')));
   }
 
   @override

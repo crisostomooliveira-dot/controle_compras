@@ -12,18 +12,31 @@ class PurchaseRequestPage extends StatefulWidget {
 }
 
 class _PurchaseRequestPageState extends State<PurchaseRequestPage> {
-  // -- State for the entire request --
   final _headerFormKey = GlobalKey<FormState>();
   String? _selectedConstructionId;
   String? _selectedCostCenterId;
 
-  // -- State for adding a single item --
   final _itemFormKey = GlobalKey<FormState>();
   Product? _selectedProduct;
   final _quantityController = TextEditingController();
   
-  // -- List of items in the current request --
   final List<RequestItem> _requestItems = [];
+  List<Product> _allProducts = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchAllProducts();
+  }
+
+  Future<void> _fetchAllProducts() async {
+    final snapshot = await FirebaseFirestore.instance.collection('products').orderBy('description').get();
+    if (mounted) {
+      setState(() {
+        _allProducts = snapshot.docs.map((doc) => Product.fromFirestore(doc)).toList();
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -35,21 +48,14 @@ class _PurchaseRequestPageState extends State<PurchaseRequestPage> {
         padding: const EdgeInsets.all(16.0),
         child: Column(
           children: [
-            // 1. Cabeçalho da Solicitação (Obra e Centro de Custo)
             _buildRequestHeader(),
             const Divider(height: 30),
-
-            // 2. Formulário para Adicionar Itens
             _buildAddItemForm(),
             const Divider(height: 30),
-
-            // 3. Tabela de Itens Adicionados
             const Text('Itens da Solicitação', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             const SizedBox(height: 10),
             _buildItemsTable(),
-            
             const Spacer(),
-            // 4. Botão para Salvar e Continuar
             _buildSaveButton(),
           ],
         ),
@@ -74,27 +80,50 @@ class _PurchaseRequestPageState extends State<PurchaseRequestPage> {
     return Form(
       key: _itemFormKey,
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Expanded(
             flex: 3,
-            child: _buildProductDropdown(),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            flex: 1,
-            child: TextFormField(
-              controller: _quantityController,
-              decoration: const InputDecoration(labelText: 'Quantidade'),
-              keyboardType: TextInputType.number,
-              validator: (v) => (v == null || v.isEmpty) ? 'Req.' : null,
+            child: Autocomplete<Product>(
+              optionsBuilder: (TextEditingValue textEditingValue) {
+                if (textEditingValue.text.length < 3) return const Iterable<Product>.empty();
+                return _allProducts.where((Product option) {
+                  return option.description.toLowerCase().contains(textEditingValue.text.toLowerCase());
+                });
+              },
+              displayStringForOption: (Product option) => option.description,
+              onSelected: (Product selection) {
+                setState(() => _selectedProduct = selection);
+              },
+              fieldViewBuilder: (context, controller, focusNode, onFieldSubmitted) {
+                return TextFormField(
+                  controller: controller,
+                  focusNode: focusNode,
+                  decoration: const InputDecoration(labelText: 'Produto (mín. 3 letras)'),
+                  validator: (value) => (_selectedProduct == null && value!.isNotEmpty) ? 'Selecione um item da lista' : null,
+                );
+              },
             ),
           ),
           const SizedBox(width: 16),
-          ElevatedButton.icon(
-            onPressed: _addItem,
-            icon: const Icon(Icons.add),
-            label: const Text('Adicionar'),
+          Expanded(
+            flex: 1, 
+            child: TextFormField(
+              controller: _quantityController,
+              decoration: const InputDecoration(labelText: 'Quantidade'),
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              validator: (v) {
+                if (v == null || v.isEmpty) return 'Req.';
+                final value = num.tryParse(v.replaceAll('.', '').replaceAll(',', '.'));
+                if (value == null || value <= 0) return 'Inválido';
+                return null;
+              },
+            )
+          ),
+          const SizedBox(width: 16),
+          Padding(
+            padding: const EdgeInsets.only(top: 8.0),
+            child: ElevatedButton.icon(onPressed: _addItem, icon: const Icon(Icons.add), label: const Text('Adicionar')),
           ),
         ],
       ),
@@ -105,52 +134,10 @@ class _PurchaseRequestPageState extends State<PurchaseRequestPage> {
     return Expanded(
       child: SingleChildScrollView(
         child: DataTable(
-          columns: const [
-            DataColumn(label: Text('Produto')),
-            DataColumn(label: Text('Qtd')),
-            DataColumn(label: Text('Unidade')),
-            DataColumn(label: Text('Ação')),
-          ],
-          rows: _requestItems.map((item) {
-            return DataRow(
-              cells: [
-                DataCell(Text(item.productDescription)),
-                DataCell(Text(item.quantity.toString())),
-                DataCell(Text(item.unit)),
-                DataCell(
-                  IconButton(
-                    icon: const Icon(Icons.remove_circle_outline, color: Colors.red),
-                    onPressed: () => setState(() => _requestItems.remove(item)),
-                  ),
-                ),
-              ],
-            );
-          }).toList(),
+          columns: const [DataColumn(label: Text('Produto')), DataColumn(label: Text('Qtd')), DataColumn(label: Text('Unidade')), DataColumn(label: Text('Ação'))],
+          rows: _requestItems.map((item) => DataRow(cells: [DataCell(Text(item.productDescription)), DataCell(Text(item.quantity.toString())), DataCell(Text(item.unit)), DataCell(IconButton(icon: const Icon(Icons.remove_circle_outline, color: Colors.red), onPressed: () => setState(() => _requestItems.remove(item))))])).toList(),
         ),
       ),
-    );
-  }
-
-   Widget _buildProductDropdown() {
-    return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance.collection('products').snapshots(),
-      builder: (context, snapshot) {
-        if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
-
-        final products = snapshot.data!.docs.map((doc) => Product.fromFirestore(doc)).toList();
-
-        return DropdownButtonFormField<Product>(
-          decoration: const InputDecoration(labelText: 'Produto'),
-          items: products.map((product) {
-            return DropdownMenuItem<Product>(
-              value: product,
-              child: Text(product.description),
-            );
-          }).toList(),
-          onChanged: (value) => setState(() => _selectedProduct = value),
-          validator: (value) => value == null ? 'Selecione' : null,
-        );
-      },
     );
   }
 
@@ -159,37 +146,25 @@ class _PurchaseRequestPageState extends State<PurchaseRequestPage> {
       stream: FirebaseFirestore.instance.collection(collection).snapshots(),
       builder: (context, snapshot) {
         if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
-        var items = snapshot.data!.docs.map((doc) {
-          final data = doc.data() as Map<String, dynamic>;
-          return DropdownMenuItem(value: doc.id, child: Text(data['name'] ?? 'N/A'));
-        }).toList();
-        return DropdownButtonFormField<String>(
-          decoration: InputDecoration(labelText: label),
-          items: items,
-          onChanged: onChanged,
-          validator: (v) => v == null ? 'Selecione' : null,
-        );
+        var items = snapshot.data!.docs.map((doc) => DropdownMenuItem(value: doc.id, child: Text((doc.data() as Map<String, dynamic>)['name'] ?? 'N/A'))).toList();
+        return DropdownButtonFormField<String>(decoration: InputDecoration(labelText: label), items: items, onChanged: onChanged, validator: (v) => v == null ? 'Selecione' : null);
       },
     );
   }
 
   void _addItem() {
     if (_itemFormKey.currentState!.validate() && _selectedProduct != null) {
-      final quantity = num.tryParse(_quantityController.text);
-      if (quantity == null) return;
+      final String quantityText = _quantityController.text;
+      final num? quantity = num.tryParse(quantityText.replaceAll('.', '').replaceAll(',', '.'));
 
-      final newItem = RequestItem(
-        productId: _selectedProduct!.id,
-        productDescription: _selectedProduct!.description,
-        quantity: quantity,
-        unit: _selectedProduct!.unit,
-      );
+      if (quantity == null || quantity <= 0) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Por favor, insira uma quantidade válida.')));
+        return;
+      }
 
-      setState(() {
-        _requestItems.add(newItem);
-      });
+      final newItem = RequestItem(productId: _selectedProduct!.id, productDescription: _selectedProduct!.description, quantity: quantity, unit: _selectedProduct!.unit);
+      setState(() => _requestItems.add(newItem));
 
-      // Reset form
       _itemFormKey.currentState!.reset();
       _quantityController.clear();
       setState(() => _selectedProduct = null);
@@ -199,37 +174,52 @@ class _PurchaseRequestPageState extends State<PurchaseRequestPage> {
   Widget _buildSaveButton() {
     return SizedBox(
       width: double.infinity,
-      child: ElevatedButton(
-        onPressed: _requestItems.isEmpty ? null : _saveRequest,
-        child: const Text('Salvar e Ir para Cotação'),
-        style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16)),
-      ),
+      child: ElevatedButton(onPressed: _requestItems.isEmpty ? null : _saveRequest, child: const Text('Salvar e Ir para Cotação'), style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16))),
     );
   }
 
   void _saveRequest() async {
-    if (!_headerFormKey.currentState!.validate()) return;
+    if (!_headerFormKey.currentState!.validate() || _requestItems.isEmpty) return;
 
-    final itemsAsMaps = _requestItems.map((item) => item.toMap()).toList();
+    try {
+      final firestore = FirebaseFirestore.instance;
+      final counterRef = firestore.collection('counters').doc('purchase_requests');
 
-    final newRequest = await FirebaseFirestore.instance.collection('purchase_requests').add({
-      'constructionId': _selectedConstructionId,
-      'costCenterId': _selectedCostCenterId,
-      'items': itemsAsMaps, // Salva a lista de itens
-      'requestDate': Timestamp.now(),
-      'status': 'Solicitado',
-    });
+      final newRequestDoc = await firestore.runTransaction((transaction) async {
+        final counterSnapshot = await transaction.get(counterRef);
+        int newRequestNumber = 1;
+        if (counterSnapshot.exists) {
+          newRequestNumber = (counterSnapshot.data()!['lastNumber'] as num).toInt() + 1;
+        } else {
+          transaction.set(counterRef, {'lastNumber': 1});
+        }
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Solicitação criada! Redirecionando para cotação...')),
-    );
+        final itemsAsMaps = _requestItems.map((item) => item.toMap()).toList();
+        final newRequestRef = firestore.collection('purchase_requests').doc();
 
-    // Navega para a próxima etapa
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(
-        builder: (context) => PurchaseDetailPage(purchaseRequestId: newRequest.id),
-      ),
-    );
+        transaction.set(newRequestRef, {
+          'sequentialId': newRequestNumber,
+          'constructionId': _selectedConstructionId,
+          'costCenterId': _selectedCostCenterId,
+          'items': itemsAsMaps,
+          'requestDate': Timestamp.now(),
+          'status': 'Solicitado',
+        });
+
+        transaction.update(counterRef, {'lastNumber': newRequestNumber});
+        return newRequestRef;
+      });
+
+      final newRequestData = await newRequestDoc.get();
+      final newSequentialId = newRequestData.data()?['sequentialId'];
+
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Solicitação Nº $newSequentialId criada! Redirecionando...')));
+
+      Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (context) => PurchaseDetailPage(purchaseRequestId: newRequestDoc.id)));
+
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erro ao salvar solicitação: $e')));
+    }
   }
 
   @override
