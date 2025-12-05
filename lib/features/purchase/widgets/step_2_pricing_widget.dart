@@ -15,12 +15,22 @@ class Step2PricingWidget extends StatefulWidget {
 class _Step2PricingWidgetState extends State<Step2PricingWidget> {
   String? _selectedSupplierId;
   late Map<String, TextEditingController> _priceControllers;
+  String _freightType = 'CIF'; // 'CIF' or 'FOB'
+  final TextEditingController _freightCostController = TextEditingController();
+
 
   @override
   void initState() {
     super.initState();
     final items = widget.requestData['items'] as List;
     _priceControllers = { for (var item in items) item['productId'] as String : TextEditingController() };
+  }
+
+  @override
+  void dispose() {
+    _priceControllers.forEach((_, controller) => controller.dispose());
+    _freightCostController.dispose();
+    super.dispose();
   }
 
   @override
@@ -75,6 +85,7 @@ class _Step2PricingWidgetState extends State<Step2PricingWidget> {
           },
         ),
         if (_selectedSupplierId != null) ..._buildPriceFields(),
+        if (_selectedSupplierId != null) ..._buildFreightFields(),
         if (_selectedSupplierId != null)
           Padding(
             padding: const EdgeInsets.only(top: 16.0),
@@ -98,6 +109,42 @@ class _Step2PricingWidgetState extends State<Step2PricingWidget> {
     }).toList();
   }
 
+  List<Widget> _buildFreightFields() {
+    return [
+      const SizedBox(height: 16),
+      DropdownButtonFormField<String>(
+        value: _freightType,
+        decoration: const InputDecoration(labelText: 'Tipo de Frete'),
+        items: const [
+          DropdownMenuItem(value: 'CIF', child: Text('CIF (Custo, Seguro e Frete por conta do fornecedor)')),
+          DropdownMenuItem(value: 'FOB', child: Text('FOB (Frete por conta do comprador)')),
+        ],
+        onChanged: (value) {
+          if (value != null) {
+            setState(() {
+              _freightType = value;
+              if (value == 'CIF') {
+                _freightCostController.clear();
+              }
+            });
+          }
+        },
+      ),
+      if (_freightType == 'FOB')
+        Padding(
+          padding: const EdgeInsets.only(top: 8.0),
+          child: TextFormField(
+            controller: _freightCostController,
+            decoration: const InputDecoration(
+              labelText: 'Custo do Frete (R\$)',
+              prefixText: 'R\$ ',
+            ),
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          ),
+        ),
+    ];
+  }
+
   Widget _buildQuotationTable() {
     final List<dynamic> requestItems = widget.requestData['items'];
     return StreamBuilder<QuerySnapshot>(
@@ -106,6 +153,7 @@ class _Step2PricingWidgetState extends State<Step2PricingWidget> {
         if (!snapshot.hasData || snapshot.data!.docs.isEmpty) return const Center(child: Padding(padding: EdgeInsets.all(16), child: Text('Nenhuma cotação adicionada.')));
         final quotations = snapshot.data!.docs;
         final suppliers = quotations.map((doc) => doc.data() as Map<String, dynamic>).toList();
+
         final Map<String, double> minPrices = {};
         for (var item in requestItems) {
           double currentMin = double.infinity;
@@ -118,15 +166,52 @@ class _Step2PricingWidgetState extends State<Step2PricingWidget> {
           }
           minPrices[item['productId']] = currentMin;
         }
+
         return Column(
           children: [
             SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: DataTable(
-                columns: [const DataColumn(label: Text('Item')), const DataColumn(label: Text('Qtd')), ...suppliers.map((s) => DataColumn(label: Text(s['supplierName'] ?? 'N/A'))), const DataColumn(label: Text('Ações'))],
+                columns: [
+                  const DataColumn(label: Text('Item')),
+                  ...suppliers.map((s) => DataColumn(label: Text(s['supplierName'] ?? 'N/A'))),
+                  const DataColumn(label: Text('Ações'))
+                ],
                 rows: [
-                  ...requestItems.map((item) => DataRow(cells: [DataCell(Text(item['productDescription'])), DataCell(Text('${item['quantity']} ${item['unit']}')), ...suppliers.map((supplier) { final supplierItem = (supplier['items'] as List).firstWhere((i) => i['productId'] == item['productId'], orElse: () => null); if (supplierItem == null) return const DataCell(Text('-')); final price = (supplierItem['unitPrice'] as num).toDouble(); final isMinPrice = price > 0 && price == minPrices[item['productId']]; return DataCell(Text(_formatCurrency(price), style: TextStyle(color: isMinPrice ? Colors.green : Colors.black, fontWeight: isMinPrice ? FontWeight.bold : FontWeight.normal))); }), const DataCell(Text(''))])),
-                  DataRow(cells: [const DataCell(Text('TOTAL', style: TextStyle(fontWeight: FontWeight.bold))), const DataCell(Text('')), ...suppliers.map((s) => DataCell(Text(_formatCurrency((s['totalPrice'] as num).toDouble()), style: const TextStyle(fontWeight: FontWeight.bold)))), DataCell(Row(children: suppliers.map((s) => IconButton(icon: const Icon(Icons.delete_forever, color: Colors.red), onPressed: () => _deleteQuotation(s['supplierId']))).toList()))]),
+                  ...requestItems.map((item) => DataRow(cells: [
+                    DataCell(Text('${item['productDescription']}\n(Qtd: ${item['quantity']} ${item['unit']})')),
+                    ...suppliers.map((supplier) { 
+                      final supplierItem = (supplier['items'] as List).firstWhere((i) => i['productId'] == item['productId'], orElse: () => null); 
+                      if (supplierItem == null) return const DataCell(Text('-')); 
+                      final price = (supplierItem['unitPrice'] as num).toDouble(); 
+                      final isMinPrice = price > 0 && price == minPrices[item['productId']]; 
+                      return DataCell(Text(_formatCurrency(price), style: TextStyle(color: isMinPrice ? Colors.green : Colors.black, fontWeight: isMinPrice ? FontWeight.bold : FontWeight.normal))); 
+                    }), 
+                    const DataCell(Text(''))
+                  ])),
+                  DataRow(
+                    cells: [
+                      const DataCell(Text('Subtotal', style: TextStyle(fontWeight: FontWeight.bold))),
+                      ...suppliers.map((s) => DataCell(Text(_formatCurrency((s['subtotal'] as num?)?.toDouble() ?? 0.0), style: const TextStyle(fontWeight: FontWeight.bold)))),
+                      const DataCell(Text(''))
+                    ]
+                  ),
+                  DataRow(
+                    cells: [
+                      const DataCell(Text('Frete', style: TextStyle(fontWeight: FontWeight.bold))),
+                      ...suppliers.map((s) {
+                        final freightCost = (s['freightCost'] as num?)?.toDouble() ?? 0.0;
+                        final freightType = s['freightType'] ?? 'CIF';
+                        return DataCell(Text(freightType == 'FOB' ? _formatCurrency(freightCost) : 'CIF', style: const TextStyle(fontWeight: FontWeight.bold)));
+                      }),
+                      const DataCell(Text(''))
+                    ]
+                  ),
+                  DataRow(cells: [
+                    const DataCell(Text('TOTAL', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16))),
+                    ...suppliers.map((s) => DataCell(Text(_formatCurrency((s['totalPrice'] as num?)?.toDouble() ?? 0.0), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)))), 
+                    DataCell(Row(children: suppliers.map((s) => IconButton(icon: const Icon(Icons.delete_forever, color: Colors.red), onPressed: () => _deleteQuotation(s['supplierId']))).toList()))
+                  ]),
                 ],
               ),
             ),
@@ -144,8 +229,59 @@ class _Step2PricingWidgetState extends State<Step2PricingWidget> {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Não foi possível determinar a melhor opção. Verifique os preços.')));
       return;
     }
+
     final totalValue = bestBuys.fold<double>(0, (sum, item) => sum + (item['unitPrice'] * item['quantity']));
-    showDialog(context: context, builder: (ctx) => AlertDialog(title: const Text('Resumo do Pedido Otimizado'), content: SizedBox(width: double.maxFinite, child: ListView(shrinkWrap: true, children: [...bestBuys.map((item) => ListTile(title: Text(item['productDescription']), subtitle: Text('Fornecedor: ${item['supplierName']}'), trailing: Text(_formatCurrency(item['unitPrice'] as double)))), const Divider(), Padding(padding: const EdgeInsets.only(top: 8.0), child: Text('Valor Total do Pedido: ${_formatCurrency(totalValue)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)))])), actions: [TextButton(child: const Text('Cancelar'), onPressed: () => Navigator.of(ctx).pop()), ElevatedButton(child: const Text('Confirmar e Criar Pedido'), onPressed: () { _createMixedPurchaseOrder(bestBuys, totalValue); Navigator.of(ctx).pop(); })]));
+
+    final uniqueSupplierIds = bestBuys.map((item) => item['supplierId']).toSet();
+    double totalFreight = 0;
+    for (var supplierId in uniqueSupplierIds) {
+      final supplierData = suppliers.firstWhere((s) => s['supplierId'] == supplierId);
+      if (supplierData['freightType'] == 'FOB') {
+        totalFreight += (supplierData['freightCost'] as num).toDouble();
+      }
+    }
+
+    final grandTotal = totalValue + totalFreight;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Resumo do Pedido Otimizado'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              ...bestBuys.map((item) => ListTile(
+                title: Text(item['productDescription']),
+                subtitle: Text('Fornecedor: ${item['supplierName']}'),
+                trailing: Text(_formatCurrency(item['unitPrice'] as double)),
+              )),
+              const Divider(),
+              Padding(
+                padding: const EdgeInsets.only(top: 8.0),
+                child: Text('Valor Total dos Itens: ${_formatCurrency(totalValue)}', style: const TextStyle(fontWeight: FontWeight.bold)),
+              ),
+              Padding(
+                padding: const EdgeInsets.only(top: 8.0),
+                child: Text('Custo Total do Frete: ${_formatCurrency(totalFreight)}', style: const TextStyle(fontWeight: FontWeight.bold)),
+              ),
+              Padding(
+                padding: const EdgeInsets.only(top: 8.0),
+                child: Text('Valor Total do Pedido: ${_formatCurrency(grandTotal)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+              ),
+            ]
+          )
+        ),
+        actions: [
+          TextButton(child: const Text('Cancelar'), onPressed: () => Navigator.of(ctx).pop()),
+          ElevatedButton(child: const Text('Confirmar e Criar Pedido'), onPressed: () {
+            _createMixedPurchaseOrder(bestBuys, grandTotal);
+            Navigator.of(ctx).pop();
+          })
+        ]
+      )
+    );
   }
 
   List<Map<String, dynamic>> _calculateBestBuys(List<Map<String, dynamic>> suppliers, List<dynamic> requestItems) {
@@ -175,7 +311,13 @@ class _Step2PricingWidgetState extends State<Step2PricingWidget> {
     if (supplierNames.length == 1) {
       finalSupplierName = supplierNames.first!;
     }
-    FirebaseFirestore.instance.collection('purchase_requests').doc(widget.purchaseRequestId).update({'status': 'Pedido Criado', 'selectedSupplierName': finalSupplierName, 'totalPrice': totalValue, 'finalItems': finalItems, 'orderCreationDate': Timestamp.now()});
+    FirebaseFirestore.instance.collection('purchase_requests').doc(widget.purchaseRequestId).update({
+      'status': 'Pedido Criado',
+      'selectedSupplierName': finalSupplierName,
+      'totalPrice': totalValue,
+      'finalItems': finalItems,
+      'orderCreationDate': Timestamp.now()
+    });
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Pedido de compra criado com sucesso!')));
   }
 
@@ -187,7 +329,7 @@ class _Step2PricingWidgetState extends State<Step2PricingWidget> {
     final supplierName = supplierDoc.data()?['name'] ?? 'N/A';
     final items = widget.requestData['items'] as List;
     List<Map<String, dynamic>> pricedItems = [];
-    num totalQuotePrice = 0;
+    num subtotal = 0;
     for (var item in items) {
       final productId = item['productId'] as String;
       final priceText = _priceControllers[productId]!.text.replaceAll(',', '.');
@@ -197,21 +339,37 @@ class _Step2PricingWidgetState extends State<Step2PricingWidget> {
         return;
       }
       final quantity = item['quantity'] as num;
-      totalQuotePrice += unitPrice * quantity;
+      subtotal += unitPrice * quantity;
       pricedItems.add({ ...item, 'unitPrice': unitPrice });
     }
-    await FirebaseFirestore.instance.collection('purchase_requests').doc(widget.purchaseRequestId).collection('quotations').doc(_selectedSupplierId).set({'supplierId': _selectedSupplierId, 'supplierName': supplierName, 'totalPrice': totalQuotePrice, 'items': pricedItems, 'addedAt': Timestamp.now()});
+
+    double freightCost = 0.0;
+    if (_freightType == 'FOB') {
+      final freightText = _freightCostController.text.replaceAll(',', '.');
+      freightCost = double.tryParse(freightText) ?? 0.0;
+      if (freightCost <= 0) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Preencha um custo de frete válido!')));
+        return;
+      }
+    }
+
+    num totalPrice = subtotal + freightCost;
+
+    await FirebaseFirestore.instance.collection('purchase_requests').doc(widget.purchaseRequestId).collection('quotations').doc(_selectedSupplierId).set({
+      'supplierId': _selectedSupplierId,
+      'supplierName': supplierName,
+      'subtotal': subtotal,
+      'freightType': _freightType,
+      'freightCost': freightCost,
+      'totalPrice': totalPrice,
+      'items': pricedItems,
+      'addedAt': Timestamp.now()
+    });
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Cotação salva!')));
   }
 
   void _deleteQuotation(String quotationId) {
     FirebaseFirestore.instance.collection('purchase_requests').doc(widget.purchaseRequestId).collection('quotations').doc(quotationId).delete();
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Cotação excluída!')));
-  }
-
-  @override
-  void dispose() {
-    _priceControllers.forEach((_, controller) => controller.dispose());
-    super.dispose();
   }
 }

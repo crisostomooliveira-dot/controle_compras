@@ -66,22 +66,24 @@ class _PriceHistoryPageState extends State<PriceHistoryPage> {
             ),
             const SizedBox(height: 16),
             Expanded(
-              child: StreamBuilder<QuerySnapshot>(
-                stream: FirebaseFirestore.instance.collection('purchase_requests').where('status', isEqualTo: 'Finalizado').snapshots(),
-                builder: (context, snapshot) {
-                  if (snapshot.hasError) return const Text('Ocorreu um erro na busca.');
-                  if (snapshot.connectionState == ConnectionState.waiting) return const CircularProgressIndicator();
-                  
-                  final allItems = _extractAndFilterItems(snapshot.data?.docs ?? []);
+              child: _currentSearchTerm.length < 3
+                  ? const Center(child: Text('Digite ao menos 3 caracteres para buscar.'))
+                  : StreamBuilder<QuerySnapshot>(
+                      stream: FirebaseFirestore.instance.collectionGroup('quotations').snapshots(),
+                      builder: (context, snapshot) {
+                        if (snapshot.hasError) return const Text('Ocorreu um erro na busca.');
+                        if (snapshot.connectionState == ConnectionState.waiting) return const CircularProgressIndicator();
+                        
+                        final allItems = _extractAndFilterItems(snapshot.data?.docs ?? []);
 
-                  if (allItems.isEmpty) return const Center(child: Text('Nenhum histórico encontrado para este produto.'));
-                  
-                  return ListView.builder(
-                    itemCount: allItems.length,
-                    itemBuilder: (context, index) => _buildHistoryCard(allItems[index]),
-                  );
-                },
-              ),
+                        if (allItems.isEmpty) return const Center(child: Text('Nenhum histórico encontrado para este produto.'));
+                        
+                        return ListView.builder(
+                          itemCount: allItems.length,
+                          itemBuilder: (context, index) => _buildHistoryCard(allItems[index]),
+                        );
+                      },
+                    ),
             ),
           ],
         ),
@@ -89,38 +91,39 @@ class _PriceHistoryPageState extends State<PriceHistoryPage> {
     );
   }
 
-  List<Map<String, dynamic>> _extractAndFilterItems(List<QueryDocumentSnapshot> docs) {
-    if (_currentSearchTerm.length < 3) return [];
-
+  List<Map<String, dynamic>> _extractAndFilterItems(List<QueryDocumentSnapshot> quotationDocs) {
     List<Map<String, dynamic>> filteredItems = [];
-    for (var doc in docs) {
+    for (var doc in quotationDocs) {
       final data = doc.data() as Map<String, dynamic>;
-      final items = (data['finalItems'] as List<dynamic>?) ?? [];
+      final items = (data['items'] as List<dynamic>?) ?? [];
       
       for (var item in items) {
         if ((item['productDescription'] as String).toLowerCase().contains(_currentSearchTerm)) {
           filteredItems.add({
             ...item,
-            'orderDate': (data['orderCreationDate'] as Timestamp?)?.toDate(),
-            'constructionId': data['constructionId'],
+            'orderDate': (data['addedAt'] as Timestamp?)?.toDate(),
+            'constructionId': doc.reference.parent.parent?.id, // Getting constructionId from the parent document
+            'supplierName': data['supplierName'],
           });
         }
       }
     }
+    // Sort by date descending
+    filteredItems.sort((a, b) => (b['orderDate'] as DateTime).compareTo(a['orderDate'] as DateTime));
     return filteredItems;
   }
 
   Widget _buildHistoryCard(Map<String, dynamic> item) {
     final date = item['orderDate'] as DateTime?;
     final formattedDate = date != null ? DateFormat('dd/MM/yyyy').format(date) : '-';
-    final constructionName = _constructionNames[item['constructionId']] ?? '-';
+    final supplierName = item['supplierName'] ?? '-';
     final unitPrice = (item['unitPrice'] as num?)?.toDouble() ?? 0.0;
 
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 4),
       child: ListTile(
         title: Text(item['productDescription']),
-        subtitle: Text('Obra: $constructionName | Data: $formattedDate'),
+        subtitle: Text('Fornecedor: $supplierName | Data: $formattedDate'),
         trailing: Text(NumberFormat.currency(locale: 'pt_BR', symbol: 'R\$').format(unitPrice)),
       ),
     );

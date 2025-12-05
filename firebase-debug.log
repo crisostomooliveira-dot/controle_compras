@@ -1,0 +1,55 @@
+[debug] [2025-12-05T02:30:15.898Z] ----------------------------------------------------------------------
+[debug] [2025-12-05T02:30:15.911Z] Command:       C:\Program Files\nodejs\node.exe C:\Users\criso\AppData\Roaming\npm\node_modules\firebase-tools\lib\bin\firebase.js deploy
+[debug] [2025-12-05T02:30:15.911Z] CLI Version:   14.22.0
+[debug] [2025-12-05T02:30:15.912Z] Platform:      win32
+[debug] [2025-12-05T02:30:15.912Z] Node Version:  v22.19.0
+[debug] [2025-12-05T02:30:15.912Z] Time:          Thu Dec 04 2025 23:30:15 GMT-0300 (Horário Padrão de Brasília)
+[debug] [2025-12-05T02:30:15.912Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2025-12-05T02:30:15.915Z] >>> [apiv2][query] GET https://firebase-public.firebaseio.com/cli.json [none]
+[debug] [2025-12-05T02:30:16.259Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2025-12-05T02:30:16.259Z] > authorizing via signed-in user (crisostomolveira@gmail.com)
+[debug] [2025-12-05T02:30:16.259Z] [iam] checking project controle-compras-b9002 for permissions ["firebase.projects.get","firebasehosting.sites.update"]
+[debug] [2025-12-05T02:30:16.260Z] Checked if tokens are valid: false, expires at: 1761352061148
+[debug] [2025-12-05T02:30:16.260Z] Checked if tokens are valid: false, expires at: 1761352061148
+[debug] [2025-12-05T02:30:16.260Z] > refreshing access token with scopes: []
+[debug] [2025-12-05T02:30:16.261Z] >>> [apiv2][query] POST https://www.googleapis.com/oauth2/v3/token [none]
+[debug] [2025-12-05T02:30:16.261Z] >>> [apiv2][body] POST https://www.googleapis.com/oauth2/v3/token [omitted]
+[debug] [2025-12-05T02:30:16.514Z] <<< [apiv2][status] POST https://www.googleapis.com/oauth2/v3/token 200
+[debug] [2025-12-05T02:30:16.514Z] <<< [apiv2][body] POST https://www.googleapis.com/oauth2/v3/token [omitted]
+[debug] [2025-12-05T02:30:16.526Z] >>> [apiv2][query] POST https://cloudresourcemanager.googleapis.com/v1/projects/controle-compras-b9002:testIamPermissions [none]
+[debug] [2025-12-05T02:30:16.526Z] >>> [apiv2][(partial)header] POST https://cloudresourcemanager.googleapis.com/v1/projects/controle-compras-b9002:testIamPermissions x-goog-quota-user=projects/controle-compras-b9002
+[debug] [2025-12-05T02:30:16.526Z] >>> [apiv2][body] POST https://cloudresourcemanager.googleapis.com/v1/projects/controle-compras-b9002:testIamPermissions {"permissions":["firebase.projects.get","firebasehosting.sites.update"]}
+[debug] [2025-12-05T02:30:16.662Z] <<< [apiv2][status] GET https://firebase-public.firebaseio.com/cli.json 200
+[debug] [2025-12-05T02:30:16.663Z] <<< [apiv2][body] GET https://firebase-public.firebaseio.com/cli.json {"cloudBuildErrorAfter":1594252800000,"cloudBuildWarnAfter":1590019200000,"defaultNode10After":1594252800000,"minVersion":"3.0.5","node8DeploysDisabledAfter":1613390400000,"node8RuntimeDisabledAfter":1615809600000,"node8WarnAfter":1600128000000}
+[debug] [2025-12-05T02:30:17.625Z] <<< [apiv2][status] POST https://cloudresourcemanager.googleapis.com/v1/projects/controle-compras-b9002:testIamPermissions 200
+[debug] [2025-12-05T02:30:17.625Z] <<< [apiv2][body] POST https://cloudresourcemanager.googleapis.com/v1/projects/controle-compras-b9002:testIamPermissions {}
+[debug] [2025-12-05T02:30:17.626Z] [iam] error while checking permissions, command may fail: Authorization failed. This account is missing the following required permissions on project controle-compras-b9002:
+
+  firebase.projects.get
+  firebasehosting.sites.update
+[debug] [2025-12-05T02:30:17.626Z] Checked if tokens are valid: true, expires at: 1764905415514
+[debug] [2025-12-05T02:30:17.626Z] Checked if tokens are valid: true, expires at: 1764905415514
+[debug] [2025-12-05T02:30:17.626Z] >>> [apiv2][query] GET https://firebase.googleapis.com/v1beta1/projects/controle-compras-b9002 [none]
+[debug] [2025-12-05T02:30:18.237Z] <<< [apiv2][status] GET https://firebase.googleapis.com/v1beta1/projects/controle-compras-b9002 403
+[debug] [2025-12-05T02:30:18.237Z] <<< [apiv2][body] GET https://firebase.googleapis.com/v1beta1/projects/controle-compras-b9002 {"error":{"code":403,"message":"The caller does not have permission","status":"PERMISSION_DENIED"}}
+[debug] [2025-12-05T02:30:18.238Z] Request to https://firebase.googleapis.com/v1beta1/projects/controle-compras-b9002 had HTTP Error: 403, The caller does not have permission
+[debug] [2025-12-05T02:30:18.558Z] FirebaseError: Request to https://firebase.googleapis.com/v1beta1/projects/controle-compras-b9002 had HTTP Error: 403, The caller does not have permission
+    at responseToError (C:\Users\criso\AppData\Roaming\npm\node_modules\firebase-tools\lib\responseToError.js:53:12)
+    at RetryOperation._fn (C:\Users\criso\AppData\Roaming\npm\node_modules\firebase-tools\lib\apiv2.js:312:77)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+[error] 
+[error] Error: Failed to get Firebase project controle-compras-b9002. Please make sure the project exists and your account has permission to access it.
+[debug] [2025-12-05T02:31:29.782Z] ----------------------------------------------------------------------
+[debug] [2025-12-05T02:31:29.784Z] Command:       C:\Program Files\nodejs\node.exe C:\Users\criso\AppData\Roaming\npm\node_modules\firebase-tools\lib\bin\firebase.js login --reauth
+[debug] [2025-12-05T02:31:29.785Z] CLI Version:   14.22.0
+[debug] [2025-12-05T02:31:29.785Z] Platform:      win32
+[debug] [2025-12-05T02:31:29.785Z] Node Version:  v22.19.0
+[debug] [2025-12-05T02:31:29.785Z] Time:          Thu Dec 04 2025 23:31:29 GMT-0300 (Horário Padrão de Brasília)
+[debug] [2025-12-05T02:31:29.785Z] ----------------------------------------------------------------------
+[debug] 
+[info] 
+[info] Visit this URL on this device to log in:
+[info] https://accounts.google.com/o/oauth2/auth?client_id=563584335869-fgrhgmd47bqnekij5i8b5pr03ho849e6.apps.googleusercontent.com&scope=email%20openid%20https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fcloudplatformprojects.readonly%20https%3A%2F%2Fwww.googleapis.com%2Fauth%2Ffirebase%20https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fcloud-platform&response_type=code&state=792692069&redirect_uri=http%3A%2F%2Flocalhost%3A9005&login_hint=crisostomolveira%40gmail.com
+[info] 
+[info] Waiting for authentication...
